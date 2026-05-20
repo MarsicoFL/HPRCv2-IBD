@@ -1,5 +1,5 @@
 # impopₖ
-v.0.0.1
+v0.2.0
 **Local ancestry and IBD inference directly from pangenome-derived alignments.**
 
 `impopk` is a small suite of Rust CLI tools that compute windowed pairwise
@@ -132,6 +132,36 @@ ancestry \
   --threads         8 \
   --output          ancestry_chr12.tsv
 ```
+
+#### Structurally variable / low-coverage regions (v0.2.0+)
+
+Pangenome-derived per-window depth can be passed to `ancestry` as a confidence
+weight. Windows where part of the reference panel does not align (centromeres,
+reference-absent structural haplotypes) are shrunk toward a uniform emission
+so the HMM relies on flanking interpolation instead of noisy local identity:
+
+```bash
+# 1. Derive a per-window weights TSV from `impg depth` (chrom, start, end, weight)
+#    Typical: weight = mean_depth / max_depth ∈ [0, 1].
+#    See research/bubble_v2/01_centromere_fix/window_capping/ for one builder.
+
+# 2. Pass it to ancestry
+ancestry \
+  --similarity-file  ibs_chr12.tsv \
+  --window-size      10000 \
+  --populations      populations.tsv \
+  --query-samples    queries.txt \
+  --window-weights   weights_chr12.tsv \
+  --weight-mode      interp \
+  --output           ancestry_chr12.tsv
+```
+
+`--weight-mode interp` (default) blends the per-window log-emission with the
+uniform prior: `log_e'(t, k) = w · log_e(t, k) + (1 − w) · log(1/K)`.
+`--weight-mode mult` shrinks emissions multiplicatively without pulling
+toward the prior. Omitting `--window-weights` is a strict no-op — the
+existing pipeline behaviour is preserved. See the paper §"TAS2R cluster"
+for the validation case study and `CHANGELOG.md` for full notes.
 
 ### 4a. Kinship scalar from detected IBD
 

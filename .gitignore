@@ -47,7 +47,6 @@ test/ibs_paf_5Mb_ALL.tsv
 test/ibs_impg_1Mb.tsv
 test/ibs_impg_30Mb_EUR.tsv
 test/ibs_impg_5Mb_ALL.tsv
-paper/
 QA_REPORT.md
 test/ibs_impg_5Mb_small.tsv
 
@@ -81,3 +80,5 @@ test/ibs_paf_chr12_*.tsv
 test/params_*.json
 METHODOLOGY.md
 *.pdf
+!paper/manuscript.pdf
+!paper/figures/*.pdf
