@@ -110,6 +110,7 @@ use impopk_ancestry_cli::{
     DemographyParams, infer_all_demography, infer_per_sample_demography,
     format_demography_report, write_demography_tsv,
     rfmix, concordance,
+    apply_window_weights, weights_for_observations, WeightMode, WindowWeights,
 };
 
 #[derive(Parser, Debug)]
@@ -256,6 +257,19 @@ struct Args {
     /// --emission-context value as starting point, scales between min_ec=1 and max_ec=15.
     #[arg(long = "adaptive-context")]
     adaptive_context: bool,
+
+    /// Per-window confidence weights TSV: `chrom, start, end, weight ∈ [0, 1]`.
+    /// Windows not listed default to weight 1.0. Typical source: pangenome
+    /// depth scaled to `mean_depth / max_depth`. See `research/bubble_v2/`.
+    #[arg(long = "window-weights")]
+    window_weights: Option<PathBuf>,
+
+    /// How to apply per-window weights to the log-emission row.
+    /// `interp` (default) blends with the uniform emission: `w·log_e + (1−w)·log(1/K)`.
+    /// `mult` scales multiplicatively: `w·log_e`. Only meaningful when
+    /// `--window-weights` is provided.
+    #[arg(long = "weight-mode", default_value = "interp")]
+    weight_mode: String,
 
     /// Run leave-one-out cross-validation on reference haplotypes
     #[arg(long = "cross-validate")]
@@ -1721,6 +1735,34 @@ fn main() -> Result<()> {
     let copying_ancestry_frac = args.copying_ancestry_frac;
     let copying_em_iters = args.copying_em_iters;
     let adaptive_context = args.adaptive_context;
+
+    // Per-window confidence weights (bubble_v2). Loaded once; lookups are
+    // chrom/start/end. Empty when --window-weights is not provided, in which
+    // case all lookups return 1.0 and the transform is a no-op.
+    let window_weights: WindowWeights = match args.window_weights.as_ref() {
+        Some(path) => {
+            let w = WindowWeights::load(path)
+                .with_context(|| format!("loading --window-weights {}", path.display()))?;
+            eprintln!(
+                "Loaded {} per-window weights from {}",
+                w.len(),
+                path.display()
+            );
+            w
+        }
+        None => WindowWeights::empty(),
+    };
+    let weight_mode: WeightMode = args
+        .weight_mode
+        .parse()
+        .map_err(|e| anyhow::anyhow!("--weight-mode: {e}"))?;
+    if args.window_weights.is_some() && args.mask_bed.is_some() {
+        eprintln!(
+            "Warning: --window-weights and --mask-bed are both set. \
+             Masked windows have uniform emissions, so weighting becomes a no-op there."
+        );
+    }
+    let weights_active = !window_weights.is_empty();
     let distance_transitions = args.distance_transitions;
     let ensemble_size = args.ensemble_size;
     let ensemble_scale = args.ensemble_scale;
@@ -1935,6 +1977,7 @@ fn main() -> Result<()> {
                 // Step 2: Optionally precompute and further process log emissions
                 if contrast_normalize || weighted_context || dampen_emissions || rank_emissions
                     || hierarchical_emissions || consistency_emissions || pairwise_emissions
+                    || weights_active
                 {
                     // For contrast normalization, weighted context, dampening, rank, or
                     // hierarchical blending, we need the log-emission matrix for post-processing
@@ -2018,11 +2061,19 @@ fn main() -> Result<()> {
                     };
 
                     // Apply weighted log-emission smoothing as additional refinement
-                    let final_emissions = if weighted_context && effective_ec > 0 {
+                    let mut final_emissions = if weighted_context && effective_ec > 0 {
                         smooth_log_emissions_weighted(&emissions, effective_ec)
                     } else {
                         emissions
                     };
+
+                    // Apply per-window support weights (bubble_v2). No-op when
+                    // --window-weights is not provided. Goes last so it scales the
+                    // fully transformed emissions.
+                    if weights_active {
+                        let ws = weights_for_observations(&window_weights, effective_obs);
+                        apply_window_weights(&mut final_emissions, &ws, weight_mode);
+                    }
 
                     // Ensemble decoding (if enabled, overrides standard FB+decode)
                     if ensemble_size > 1 {
@@ -2462,6 +2513,16 @@ fn main() -> Result<()> {
                         apply_flank_informed_bonus(&emissions, &pass1_states,
                             args.flank_inform_radius, args.flank_inform_bonus,
                             pass2_params.n_states)
+                    } else {
+                        emissions
+                    };
+
+                    // Apply per-window support weights (bubble_v2) on pass-2 emissions
+                    let emissions = if weights_active {
+                        let mut em = emissions;
+                        let ws = weights_for_observations(&window_weights, effective_obs2);
+                        apply_window_weights(&mut em, &ws, weight_mode);
+                        em
                     } else {
                         emissions
                     };

@@ -31,9 +31,13 @@ pub mod params;
 mod validation;
 pub mod rfmix;
 pub mod concordance;
+pub mod window_weights;
 
 pub use hmm::*;
 pub use ancestry::*;
+pub use window_weights::{
+    apply_window_weights, weights_for_observations, HasWindowKey, WeightMode, WindowWeights,
+};
 pub use demography::{
     DemographyParams, DemographicResult, PulseEstimate, SampleDemographicResult,
     extract_tract_lengths, infer_demography, infer_all_demography,
