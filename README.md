@@ -1,5 +1,5 @@
 # impopₖ
-v0.2.0
+v0.2.1
 **Local ancestry and IBD inference directly from pangenome-derived alignments.**
 
 `impopk` is a small suite of Rust CLI tools that compute windowed pairwise
@@ -133,19 +133,30 @@ ancestry \
   --output          ancestry_chr12.tsv
 ```
 
-#### Structurally variable / low-coverage regions (v0.2.0+)
+#### Structurally variable / low-coverage regions (v0.2.1+)
 
 Pangenome-derived per-window depth can be passed to `ancestry` as a confidence
 weight. Windows where part of the reference panel does not align (centromeres,
 reference-absent structural haplotypes) are shrunk toward a uniform emission
-so the HMM relies on flanking interpolation instead of noisy local identity:
+so the HMM relies on flanking interpolation instead of noisy local identity.
+
+Build the weights TSV directly from `impg depth` (one-liner; the output of
+`impg depth --combined-output` has columns `seq_name length depth samples`):
 
 ```bash
-# 1. Derive a per-window weights TSV from `impg depth` (chrom, start, end, weight)
-#    Typical: weight = mean_depth / max_depth ∈ [0, 1].
-#    See research/bubble_v2/01_centromere_fix/window_capping/ for one builder.
+MAX=$(awk -F'\t' '/^[^#]/ {if ($3>m) m=$3} END {print m}' chr12.combined.bed)
+awk -F'\t' -v MAX=$MAX -v WIN=10000 '
+  BEGIN { print "chrom\tstart\tend\tweight" }
+  /^[^#]/ {
+    chrom=$1; len=$2; depth=$3
+    for (s=cursor[chrom]; s<cursor[chrom]+len; s+=WIN) {
+      e = (s+WIN > cursor[chrom]+len) ? cursor[chrom]+len : s+WIN
+      printf "%s\t%d\t%d\t%.4f\n", chrom, s, e, depth/MAX
+    }
+    cursor[chrom] += len
+  }
+' chr12.combined.bed > weights_chr12.tsv
 
-# 2. Pass it to ancestry
 ancestry \
   --similarity-file  ibs_chr12.tsv \
   --window-size      10000 \
@@ -158,10 +169,18 @@ ancestry \
 
 `--weight-mode interp` (default) blends the per-window log-emission with the
 uniform prior: `log_e'(t, k) = w · log_e(t, k) + (1 − w) · log(1/K)`.
-`--weight-mode mult` shrinks emissions multiplicatively without pulling
-toward the prior. Omitting `--window-weights` is a strict no-op — the
-existing pipeline behaviour is preserved. See the paper §"TAS2R cluster"
-for the validation case study and `CHANGELOG.md` for full notes.
+`--weight-mode mult` shrinks log-emissions multiplicatively (after the
+forward-backward normalization the effect is similar to `interp` at the same
+`w`, with slightly less aggressive pull toward the prior).
+
+If more than 10% of windows in the similarity file have no matching row in
+the weights file, `ancestry` emits a warning that suggests a coordinate-system
+or grid mismatch. Omitting `--window-weights` is a strict no-op (the existing
+v0.1.0 pipeline behaviour is preserved bit-for-bit; this property is
+exercised in CI by `data/examples/ancestry/run_weights.sh`). See the paper
+§"TAS2R cluster" for the validation case study, `CHANGELOG.md` for full
+release notes, and `research/bubble_v2/01_centromere_fix/window_capping/` for
+an alternative builder that subdivides large bubbles into capped sub-windows.
 
 ### 4a. Kinship scalar from detected IBD
 

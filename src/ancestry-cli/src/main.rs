@@ -7,6 +7,12 @@ use std::fs::File;
 use std::io::{BufRead, BufReader, BufWriter, Write};
 use std::path::PathBuf;
 use std::process::{Command, Stdio};
+use std::sync::Once;
+
+/// One-shot guard for the "weights file matches < 90% of windows" warning.
+/// Fires at most once per `ancestry` invocation, from whichever query thread
+/// first sees the low-coverage condition.
+static WEIGHTS_COVERAGE_WARNED: Once = Once::new();
 
 use anyhow::{Context, Result};
 use clap::Parser;
@@ -110,7 +116,7 @@ use impopk_ancestry_cli::{
     DemographyParams, infer_all_demography, infer_per_sample_demography,
     format_demography_report, write_demography_tsv,
     rfmix, concordance,
-    apply_window_weights, weights_for_observations, WeightMode, WindowWeights,
+    apply_window_weights, WeightMode, WindowWeights,
 };
 
 #[derive(Parser, Debug)]
@@ -2071,7 +2077,16 @@ fn main() -> Result<()> {
                     // --window-weights is not provided. Goes last so it scales the
                     // fully transformed emissions.
                     if weights_active {
-                        let ws = weights_for_observations(&window_weights, effective_obs);
+                        let (ws, missing) = window_weights.build_vector(effective_obs);
+                        if !effective_obs.is_empty() && missing * 10 > effective_obs.len() {
+                            WEIGHTS_COVERAGE_WARNED.call_once(|| {
+                                eprintln!(
+                                    "Warning: --window-weights file matches < 90% of windows ({} of {} fell back to weight=1.0); coordinate system or window grid may not align",
+                                    missing,
+                                    effective_obs.len()
+                                );
+                            });
+                        }
                         apply_window_weights(&mut final_emissions, &ws, weight_mode);
                     }
 
@@ -2520,7 +2535,7 @@ fn main() -> Result<()> {
                     // Apply per-window support weights (bubble_v2) on pass-2 emissions
                     let emissions = if weights_active {
                         let mut em = emissions;
-                        let ws = weights_for_observations(&window_weights, effective_obs2);
+                        let (ws, _missing) = window_weights.build_vector(effective_obs2);
                         apply_window_weights(&mut em, &ws, weight_mode);
                         em
                     } else {

@@ -36,7 +36,8 @@ pub mod window_weights;
 pub use hmm::*;
 pub use ancestry::*;
 pub use window_weights::{
-    apply_window_weights, weights_for_observations, HasWindowKey, WeightMode, WindowWeights,
+    apply_window_weights, try_apply_window_weights, weights_for_observations, HasWindowKey,
+    WeightMode, WindowWeights,
 };
 pub use demography::{
     DemographyParams, DemographicResult, PulseEstimate, SampleDemographicResult,

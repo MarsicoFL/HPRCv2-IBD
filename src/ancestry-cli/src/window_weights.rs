@@ -20,12 +20,20 @@
 //!   ```text
 //!   log_e'(t, k) = w_t · log_e(t, k)
 //!   ```
-//!   Shrinks all emissions uniformly, making the HMM less confident overall
-//!   without forcing it toward the prior. Provided as a comparison knob.
+//!   Shrinks all log-emissions toward zero. Note that `log_e = 0` means
+//!   "probability 1", so after the forward-backward normalization this also
+//!   flattens to (near-)uniform: the relative ranking between states is
+//!   preserved, but the absolute magnitudes lose their discriminative power.
+//!   In practice the effect is similar to `Interp` at the same `w`, with
+//!   slightly less aggressive pull toward the prior. Provided as a comparison
+//!   knob, not the recommended default.
 //!
 //! ## File format
 //!
-//! A TSV produced by `make_capped_windows.py`:
+//! A TSV with header `chrom <TAB> start <TAB> end <TAB> weight`. The header
+//! is optional: if the first non-comment row lacks any of the four expected
+//! column names, columns are taken in positional order (chrom, start, end,
+//! weight) and the first row is parsed as data.
 //!
 //! ```text
 //! chrom    start   end     weight
@@ -69,10 +77,13 @@ impl std::str::FromStr for WeightMode {
 /// A keyed table of per-window confidence weights.
 ///
 /// Lookups are by `(chrom, start, end)`. Missing windows return `1.0`.
+///
+/// Internally the table is a nested map (`chrom → (start, end) → weight`)
+/// so that `get(&str, u64, u64)` lookups do not allocate a `String` per call.
 #[derive(Debug, Default, Clone)]
 pub struct WindowWeights {
-    /// `(chrom, start, end) -> weight`.
-    table: HashMap<(String, u64, u64), f64>,
+    /// `chrom -> (start, end) -> weight`.
+    table: HashMap<String, HashMap<(u64, u64), f64>>,
 }
 
 impl WindowWeights {
@@ -96,7 +107,8 @@ impl WindowWeights {
         let mut col_end = 2usize;
         let mut col_weight = 3usize;
 
-        let mut table: HashMap<(String, u64, u64), f64> = HashMap::new();
+        let mut table: HashMap<String, HashMap<(u64, u64), f64>> = HashMap::new();
+        let mut total = 0usize;
         for (lineno, line_res) in reader.lines().enumerate() {
             let line = line_res
                 .with_context(|| format!("reading line {} of {}", lineno + 1, path.display()))?;
@@ -108,11 +120,15 @@ impl WindowWeights {
             }
             let parts: Vec<&str> = line.split('\t').collect();
 
-            // Header detection: first non-comment row with a non-numeric `start` column.
+            // Header detection: only the *first* non-comment row is inspected.
+            // A header is recognized if any field matches one of the four
+            // expected column names. Otherwise the row is treated as data.
             if !header_seen {
-                header_seen = true;
-                let header_like = parts.iter().any(|f| matches!(*f, "chrom" | "start" | "end" | "weight"));
+                let header_like = parts
+                    .iter()
+                    .any(|f| matches!(*f, "chrom" | "start" | "end" | "weight"));
                 if header_like {
+                    header_seen = true;
                     for (i, f) in parts.iter().enumerate() {
                         match *f {
                             "chrom" => col_chrom = i,
@@ -124,6 +140,8 @@ impl WindowWeights {
                     }
                     continue;
                 }
+                // No header → all subsequent rows use positional columns.
+                header_seen = true;
             }
 
             if parts.len() <= col_weight {
@@ -133,7 +151,7 @@ impl WindowWeights {
                     lineno + 1
                 );
             }
-            let chrom = parts[col_chrom].to_string();
+            let chrom = parts[col_chrom];
             let start: u64 = parts[col_start].parse().with_context(|| {
                 format!(
                     "parsing start '{}' at {}:{}",
@@ -168,27 +186,75 @@ impl WindowWeights {
                 );
             }
 
-            table.insert((chrom, start, end), weight);
+            table
+                .entry(chrom.to_string())
+                .or_default()
+                .insert((start, end), weight);
+            total += 1;
+        }
+
+        // Sanity: detect accidental duplicate windows in the file.
+        let merged: usize = table.values().map(HashMap::len).sum();
+        if merged < total {
+            eprintln!(
+                "Warning: weights file {} contained {} duplicate window keys (later rows overwrote earlier ones)",
+                path.display(),
+                total - merged
+            );
         }
 
         Ok(Self { table })
     }
 
-    /// Number of (chrom, start, end) entries loaded.
+    /// Number of `(chrom, start, end)` entries loaded.
     pub fn len(&self) -> usize {
-        self.table.len()
+        self.table.values().map(HashMap::len).sum()
     }
 
     pub fn is_empty(&self) -> bool {
-        self.table.is_empty()
+        self.table.is_empty() || self.len() == 0
     }
 
     /// Lookup the weight for a window. Returns `1.0` for unknown windows.
+    ///
+    /// Does not allocate.
     pub fn get(&self, chrom: &str, start: u64, end: u64) -> f64 {
         self.table
-            .get(&(chrom.to_string(), start, end))
+            .get(chrom)
+            .and_then(|inner| inner.get(&(start, end)))
             .copied()
             .unwrap_or(1.0)
+    }
+
+    /// Build the per-window weight vector for a sequence of observations,
+    /// while counting how many observations fell back to the default (1.0)
+    /// because their `(chrom, start, end)` was not in the table.
+    ///
+    /// A high `(missing / total)` ratio combined with a non-empty file
+    /// strongly suggests a window-grid mismatch — see
+    /// [`Self::warn_if_low_coverage`].
+    pub fn build_vector<O: HasWindowKey>(&self, observations: &[O]) -> (Vec<f64>, usize) {
+        let mut missing = 0usize;
+        let weights = observations
+            .iter()
+            .map(|o| {
+                let w = self.get(o.chrom(), o.start(), o.end());
+                if w == 1.0 && !self.has(o.chrom(), o.start(), o.end()) {
+                    missing += 1;
+                }
+                w
+            })
+            .collect();
+        (weights, missing)
+    }
+
+    /// `true` iff `(chrom, start, end)` is present in the table (distinct
+    /// from "weight equals 1.0 but explicitly listed").
+    pub fn has(&self, chrom: &str, start: u64, end: u64) -> bool {
+        self.table
+            .get(chrom)
+            .map(|inner| inner.contains_key(&(start, end)))
+            .unwrap_or(false)
     }
 }
 
@@ -203,23 +269,42 @@ impl WindowWeights {
 ///
 /// `NEG_INFINITY` entries are preserved: they encode "no data for this state
 /// in this window" and must not be lifted by the blend.
+///
+/// # Panics
+///
+/// Panics if `log_emissions.len() != weights.len()`. Library users that may
+/// receive mismatched inputs should call [`try_apply_window_weights`] instead.
 pub fn apply_window_weights(
     log_emissions: &mut [Vec<f64>],
     weights: &[f64],
     mode: WeightMode,
 ) {
+    try_apply_window_weights(log_emissions, weights, mode)
+        .expect("apply_window_weights: weights.len() must equal log_emissions.len()")
+}
+
+/// Same as [`apply_window_weights`] but returns an error on length mismatch
+/// instead of panicking. Intended for downstream library users that cannot
+/// guarantee matched-length inputs at compile time.
+pub fn try_apply_window_weights(
+    log_emissions: &mut [Vec<f64>],
+    weights: &[f64],
+    mode: WeightMode,
+) -> Result<()> {
     if log_emissions.is_empty() {
-        return;
+        return Ok(());
     }
-    assert_eq!(
-        log_emissions.len(),
-        weights.len(),
-        "weights length must equal number of windows"
-    );
+    if log_emissions.len() != weights.len() {
+        anyhow::bail!(
+            "weights length {} does not match number of windows {}",
+            weights.len(),
+            log_emissions.len()
+        );
+    }
 
     let k = log_emissions[0].len();
     if k == 0 {
-        return;
+        return Ok(());
     }
     let log_uniform = -(k as f64).ln();
 
@@ -244,16 +329,19 @@ pub fn apply_window_weights(
             };
         }
     }
+    Ok(())
 }
 
 /// Build the per-window weight vector for a sequence of observations.
 ///
 /// For each observation, looks up `(chrom, start, end)` in the weights table.
-/// Observations whose window key is missing get weight `1.0`.
-pub fn weights_for_observations<O>(weights: &WindowWeights, observations: &[O]) -> Vec<f64>
-where
-    O: HasWindowKey,
-{
+/// Observations whose window key is missing get weight `1.0`. Use
+/// [`WindowWeights::build_vector`] if you also need the count of fallbacks
+/// (useful for the high-fallback warning at the CLI layer).
+pub fn weights_for_observations<O: HasWindowKey>(
+    weights: &WindowWeights,
+    observations: &[O],
+) -> Vec<f64> {
     observations
         .iter()
         .map(|o| weights.get(o.chrom(), o.start(), o.end()))
@@ -299,9 +387,7 @@ mod tests {
 
     #[test]
     fn rejects_out_of_range_weight() {
-        let f = write_tsv(
-            "chrom\tstart\tend\tweight\nchr12\t0\t10000\t1.5\n",
-        );
+        let f = write_tsv("chrom\tstart\tend\tweight\nchr12\t0\t10000\t1.5\n");
         let err = WindowWeights::load(f.path()).unwrap_err();
         let msg = format!("{err}");
         assert!(msg.contains("outside [0, 1]"), "got: {msg}");
@@ -309,9 +395,7 @@ mod tests {
 
     #[test]
     fn rejects_nan_weight() {
-        let f = write_tsv(
-            "chrom\tstart\tend\tweight\nchr12\t0\t10000\tnan\n",
-        );
+        let f = write_tsv("chrom\tstart\tend\tweight\nchr12\t0\t10000\tnan\n");
         assert!(WindowWeights::load(f.path()).is_err());
     }
 
@@ -407,9 +491,42 @@ mod tests {
     }
 
     #[test]
-    #[should_panic(expected = "weights length must equal")]
+    #[should_panic(expected = "weights.len() must equal log_emissions.len()")]
     fn length_mismatch_panics() {
         let mut log_e = vec![vec![-1.0, -2.0]];
         apply_window_weights(&mut log_e, &[0.5, 0.5], WeightMode::Interp);
+    }
+
+    #[test]
+    fn try_apply_returns_error_on_length_mismatch() {
+        let mut log_e = vec![vec![-1.0_f64, -2.0]];
+        let res = try_apply_window_weights(&mut log_e, &[0.5, 0.5], WeightMode::Interp);
+        assert!(res.is_err());
+        assert!(format!("{}", res.unwrap_err()).contains("does not match"));
+    }
+
+    #[test]
+    fn has_distinguishes_present_from_default() {
+        let f = write_tsv(
+            "chrom\tstart\tend\tweight\nchr12\t0\t10000\t1.0\n",
+        );
+        let w = WindowWeights::load(f.path()).unwrap();
+        assert!(w.has("chr12", 0, 10_000));
+        assert!(!w.has("chr12", 10_000, 20_000));
+        assert_eq!(w.get("chr12", 10_000, 20_000), 1.0); // fallback
+    }
+
+    #[test]
+    fn lookup_does_not_allocate_string() {
+        // Indirect test: querying with the same chrom many times should not
+        // grow heap usage. We just verify the API does not require ownership.
+        let f = write_tsv(
+            "chr12\t0\t10000\t0.7\n",
+        );
+        let w = WindowWeights::load(f.path()).unwrap();
+        let key: &str = "chr12";
+        for _ in 0..100 {
+            assert_eq!(w.get(key, 0, 10_000), 0.7);
+        }
     }
 }
