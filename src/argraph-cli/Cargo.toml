@@ -1,6 +1,6 @@
 [package]
 name = "impopk-argraph"
-version = "0.2.1"
+version = "0.2.2"
 edition = "2021"
 authors = ["Franco Marsico"]
 description = "Experimental: ancestral recombination graph inference from pangenome subgraphs"

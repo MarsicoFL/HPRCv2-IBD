@@ -1,6 +1,6 @@
 [package]
 name = "impopk-jacquard"
-version = "0.2.1"
+version = "0.2.2"
 edition = "2021"
 authors = ["Franco Marsico"]
 description = "Jacquard delta coefficient estimation from IBS windows for HPRC pangenome data"

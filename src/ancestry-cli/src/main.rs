@@ -266,7 +266,7 @@ struct Args {
 
     /// Per-window confidence weights TSV: `chrom, start, end, weight ∈ [0, 1]`.
     /// Windows not listed default to weight 1.0. Typical source: pangenome
-    /// depth scaled to `mean_depth / max_depth`. See `research/bubble_v2/`.
+    /// depth scaled to `mean_depth / max_depth`.
     #[arg(long = "window-weights")]
     window_weights: Option<PathBuf>,
 
@@ -1742,7 +1742,7 @@ fn main() -> Result<()> {
     let copying_em_iters = args.copying_em_iters;
     let adaptive_context = args.adaptive_context;
 
-    // Per-window confidence weights (bubble_v2). Loaded once; lookups are
+    // Per-window confidence weights. Loaded once; lookups are
     // chrom/start/end. Empty when --window-weights is not provided, in which
     // case all lookups return 1.0 and the transform is a no-op.
     let window_weights: WindowWeights = match args.window_weights.as_ref() {
@@ -2073,7 +2073,7 @@ fn main() -> Result<()> {
                         emissions
                     };
 
-                    // Apply per-window support weights (bubble_v2). No-op when
+                    // Apply per-window support weights. No-op when
                     // --window-weights is not provided. Goes last so it scales the
                     // fully transformed emissions.
                     if weights_active {
@@ -2532,7 +2532,7 @@ fn main() -> Result<()> {
                         emissions
                     };
 
-                    // Apply per-window support weights (bubble_v2) on pass-2 emissions
+                    // Apply per-window support weights on pass-2 emissions
                     let emissions = if weights_active {
                         let mut em = emissions;
                         let (ws, _missing) = window_weights.build_vector(effective_obs2);

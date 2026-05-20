@@ -1,5 +1,5 @@
 # impopₖ
-v0.2.1
+v0.2.2
 **Local ancestry and IBD inference directly from pangenome-derived alignments.**
 
 `impopk` is a small suite of Rust CLI tools that compute windowed pairwise
@@ -133,30 +133,32 @@ ancestry \
   --output          ancestry_chr12.tsv
 ```
 
-#### Structurally variable / low-coverage regions (v0.2.1+)
+#### Structurally variable / low-coverage regions (v0.2.2+)
 
 Pangenome-derived per-window depth can be passed to `ancestry` as a confidence
 weight. Windows where part of the reference panel does not align (centromeres,
 reference-absent structural haplotypes) are shrunk toward a uniform emission
 so the HMM relies on flanking interpolation instead of noisy local identity.
 
-Build the weights TSV directly from `impg depth` (one-liner; the output of
-`impg depth --combined-output` has columns `seq_name length depth samples`):
+The weights file is a tab-separated table with one row per ancestry window.
+Each row's `(chrom, start, end)` must match an ancestry window exactly (the
+same window grid used to build the similarity TSV). Unlisted windows default
+to weight 1.0.
+
+```text
+chrom    start    end      weight
+chr12    0        10000    1.0000
+chr12    10000    20000    1.0000
+...
+chr12    36400000 36410000 0.0940
+chr12    36410000 36420000 0.0940
+```
+
+To derive weights from `impg depth --combined-output`, re-tile its depth
+intervals at the ancestry window size and emit one weight row per window
+(`weight = mean_depth_in_window / max_depth`). Once the file is built:
 
 ```bash
-MAX=$(awk -F'\t' '/^[^#]/ {if ($3>m) m=$3} END {print m}' chr12.combined.bed)
-awk -F'\t' -v MAX=$MAX -v WIN=10000 '
-  BEGIN { print "chrom\tstart\tend\tweight" }
-  /^[^#]/ {
-    chrom=$1; len=$2; depth=$3
-    for (s=cursor[chrom]; s<cursor[chrom]+len; s+=WIN) {
-      e = (s+WIN > cursor[chrom]+len) ? cursor[chrom]+len : s+WIN
-      printf "%s\t%d\t%d\t%.4f\n", chrom, s, e, depth/MAX
-    }
-    cursor[chrom] += len
-  }
-' chr12.combined.bed > weights_chr12.tsv
-
 ancestry \
   --similarity-file  ibs_chr12.tsv \
   --window-size      10000 \
@@ -174,13 +176,13 @@ forward-backward normalization the effect is similar to `interp` at the same
 `w`, with slightly less aggressive pull toward the prior).
 
 If more than 10% of windows in the similarity file have no matching row in
-the weights file, `ancestry` emits a warning that suggests a coordinate-system
-or grid mismatch. Omitting `--window-weights` is a strict no-op (the existing
-v0.1.0 pipeline behaviour is preserved bit-for-bit; this property is
-exercised in CI by `data/examples/ancestry/run_weights.sh`). See the paper
-§"TAS2R cluster" for the validation case study, `CHANGELOG.md` for full
-release notes, and `research/bubble_v2/01_centromere_fix/window_capping/` for
-an alternative builder that subdivides large bubbles into capped sub-windows.
+the weights file, `ancestry` emits a warning that suggests a window-grid
+mismatch (typically caused by re-tiling at a different size or by including
+intervals that span more than one ancestry window). Omitting
+`--window-weights` is a strict no-op — exercised in CI by
+`data/examples/ancestry/run_weights.sh`. The paper bundled in `paper/`
+contains the TAS2R-locus validation case study; `CHANGELOG.md` has the
+full release notes.
 
 ### 4a. Kinship scalar from detected IBD
 

@@ -1,3 +1,0 @@
-label	total_intervals	max_depth	total_bp	fullcov_bp	fullcov_pct	n_bubbles	bubble_bp	bubble_pct	len_median	len_mean	len_q95	len_max	n_ge_200bp	n_ge_1kb	n_ge_10kb	n_ge_50kb	n_ge_100kb
-1000bp	3249	234	133324548	132373682	99.2868	55	950866	0.7132	2778	17288	29698	456957	55	55	7	3	2
-200bp	6847	234	133324548	131474418	98.6123	1551	1850130	1.3877	678	1192	3729	21620	1551	550	9	0	0

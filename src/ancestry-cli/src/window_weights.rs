@@ -1,10 +1,10 @@
 //! Per-window confidence weights for emission scaling.
 //!
-//! A window weight `w_t ∈ (0, 1]` expresses how much the HMM should trust the
-//! similarity observation at window `t`. Weights typically come from pangenome
-//! depth: `w = mean_depth / max_depth`. A window where 200 of 234 reference
-//! samples align cleanly is fully trusted (`w ≈ 0.85`); a centromeric window
-//! where only 22 samples align is barely trusted (`w ≈ 0.09`).
+//! A window weight `w_t ∈ [0, 1]` expresses how much the HMM should trust the
+//! similarity observation at window `t`. Weights typically come from a
+//! pangenome depth signal: `w = mean_depth / max_depth`. A window where the
+//! full panel aligns has weight `1.0`; a window where most of the panel
+//! drops out has weight near `0.0`.
 //!
 //! ## Modes
 //!
@@ -12,34 +12,31 @@
 //!   ```text
 //!   log_e'(t, k) = w_t · log_e(t, k) + (1 − w_t) · log(1/K)
 //!   ```
-//!   When `w_t → 0` the emission becomes uniform, forcing the HMM to lean on
-//!   the transition prior (i.e. flanking-window interpolation). This is the
-//!   correct semantics for "I don't trust the local signal".
+//!   When `w_t → 0` the emission becomes uniform and the HMM is forced to
+//!   lean on the transition prior — that is, on flanking-window evidence —
+//!   instead of on the unreliable local identity signal.
 //!
 //! - **`WeightMode::Mult`** — multiplicative scaling:
 //!   ```text
 //!   log_e'(t, k) = w_t · log_e(t, k)
 //!   ```
-//!   Shrinks all log-emissions toward zero. Note that `log_e = 0` means
-//!   "probability 1", so after the forward-backward normalization this also
-//!   flattens to (near-)uniform: the relative ranking between states is
-//!   preserved, but the absolute magnitudes lose their discriminative power.
-//!   In practice the effect is similar to `Interp` at the same `w`, with
-//!   slightly less aggressive pull toward the prior. Provided as a comparison
-//!   knob, not the recommended default.
+//!   Shrinks all log-emissions toward zero. Because `log_e = 0` is the log of
+//!   probability 1, after the forward-backward normalization this also
+//!   approaches uniform; the relative ranking between states is preserved
+//!   while their discriminative power is reduced. Behaviour is similar to
+//!   `Interp` at the same `w` with slightly less pull toward the prior.
 //!
 //! ## File format
 //!
 //! A TSV with header `chrom <TAB> start <TAB> end <TAB> weight`. The header
 //! is optional: if the first non-comment row lacks any of the four expected
-//! column names, columns are taken in positional order (chrom, start, end,
-//! weight) and the first row is parsed as data.
+//! column names, columns are taken in positional order and that row is parsed
+//! as data.
 //!
 //! ```text
-//! chrom    start   end     weight
-//! chr12    0       10000   1.0000
-//! chr12    36394552 36440248 0.9103
-//! ...
+//! chrom    start    end      weight
+//! chr1     0        10000    1.0000
+//! chr1     10000    20000    0.5500
 //! ```
 //!
 //! Windows in the similarity input that have no matching row default to
