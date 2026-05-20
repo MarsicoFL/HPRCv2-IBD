@@ -6,6 +6,8 @@
 
 use std::collections::HashMap;
 
+use crate::window_weights::HasWindowKey;
+
 /// Emission model for aggregating per-haplotype similarities into per-population scores
 #[derive(Debug, Clone, Copy, PartialEq)]
 pub enum EmissionModel {
@@ -1045,6 +1047,18 @@ pub struct AncestryObservation {
     /// Measures how stable the best-matching haplotype is across consecutive windows.
     /// Applied as a pre-softmax similarity adjustment.
     pub haplotype_consistency_bonus: Option<Vec<f64>>,
+}
+
+impl HasWindowKey for AncestryObservation {
+    fn chrom(&self) -> &str {
+        &self.chrom
+    }
+    fn start(&self) -> u64 {
+        self.start
+    }
+    fn end(&self) -> u64 {
+        self.end
+    }
 }
 
 /// Viterbi algorithm for ancestry HMM

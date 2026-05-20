@@ -6,7 +6,7 @@
 [![Code size](https://img.shields.io/github/languages/code-size/MarsicoFL/IMPOPk)](https://github.com/MarsicoFL/IMPOPk)
 [![Last commit](https://img.shields.io/github/last-commit/MarsicoFL/IMPOPk)](https://github.com/MarsicoFL/IMPOPk/commits/main)
 
-**v0.1.0 — Local ancestry and IBD inference directly from pangenome-derived alignments.**
+**v0.2.2 — Local ancestry and IBD inference directly from pangenome-derived alignments.**
 
 `impopk` is a small suite of Rust CLI tools that compute windowed pairwise
 sequence identity from haplotype-resolved assembly alignments and feed that
@@ -152,6 +152,57 @@ ancestry \
   --threads         8 \
   --output          ancestry_chr12.tsv
 ```
+
+#### Structurally variable / low-coverage regions (v0.2.2+)
+
+Pangenome-derived per-window depth can be passed to `ancestry` as a confidence
+weight. Windows where part of the reference panel does not align (centromeres,
+reference-absent structural haplotypes) are shrunk toward a uniform emission
+so the HMM relies on flanking interpolation instead of noisy local identity.
+
+The weights file is a tab-separated table with one row per ancestry window.
+Each row's `(chrom, start, end)` must match an ancestry window exactly (the
+same window grid used to build the similarity TSV). Unlisted windows default
+to weight 1.0.
+
+```text
+chrom    start    end      weight
+chr12    0        10000    1.0000
+chr12    10000    20000    1.0000
+...
+chr12    36400000 36410000 0.0940
+chr12    36410000 36420000 0.0940
+```
+
+To derive weights from `impg depth --combined-output`, re-tile its depth
+intervals at the ancestry window size and emit one weight row per window
+(`weight = mean_depth_in_window / max_depth`). Once the file is built:
+
+```bash
+ancestry \
+  --similarity-file  ibs_chr12.tsv \
+  --window-size      10000 \
+  --populations      populations.tsv \
+  --query-samples    queries.txt \
+  --window-weights   weights_chr12.tsv \
+  --weight-mode      interp \
+  --output           ancestry_chr12.tsv
+```
+
+`--weight-mode interp` (default) blends the per-window log-emission with the
+uniform prior: `log_e'(t, k) = w · log_e(t, k) + (1 − w) · log(1/K)`.
+`--weight-mode mult` shrinks log-emissions multiplicatively (after the
+forward-backward normalization the effect is similar to `interp` at the same
+`w`, with slightly less aggressive pull toward the prior).
+
+If more than 10% of windows in the similarity file have no matching row in
+the weights file, `ancestry` emits a warning that suggests a window-grid
+mismatch (typically caused by re-tiling at a different size or by including
+intervals that span more than one ancestry window). Omitting
+`--window-weights` is a strict no-op — exercised in CI by
+`data/examples/ancestry/run_weights.sh`. The paper bundled in `paper/`
+contains the TAS2R-locus validation case study; `CHANGELOG.md` has the
+full release notes.
 
 ### 4a. Kinship scalar from detected IBD
 
