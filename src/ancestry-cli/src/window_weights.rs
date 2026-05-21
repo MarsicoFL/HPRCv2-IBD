@@ -185,6 +185,16 @@ impl WindowWeights {
                     lineno + 1
                 );
             }
+            if end <= start {
+                anyhow::bail!(
+                    "invalid window {}:{}-{} at {}:{} (end must be strictly greater than start)",
+                    chrom,
+                    start,
+                    end,
+                    path.display(),
+                    lineno + 1
+                );
+            }
 
             table
                 .entry(chrom.to_string())
@@ -408,6 +418,20 @@ mod tests {
         let f = write_tsv("chr12\t0\t10000\t0.7\n");
         let w = WindowWeights::load(f.path()).unwrap();
         assert_eq!(w.get("chr12", 0, 10_000), 0.7);
+    }
+
+    #[test]
+    fn rejects_inverted_window() {
+        let f = write_tsv("chrom\tstart\tend\tweight\nchr12\t10000\t5000\t0.5\n");
+        let err = WindowWeights::load(f.path()).unwrap_err();
+        assert!(format!("{err}").contains("end must be strictly greater"));
+    }
+
+    #[test]
+    fn rejects_zero_length_window() {
+        let f = write_tsv("chrom\tstart\tend\tweight\nchr12\t10000\t10000\t0.5\n");
+        let err = WindowWeights::load(f.path()).unwrap_err();
+        assert!(format!("{err}").contains("end must be strictly greater"));
     }
 
     #[test]
