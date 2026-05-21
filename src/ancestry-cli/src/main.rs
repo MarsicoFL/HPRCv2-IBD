@@ -3921,12 +3921,13 @@ fn load_similarity_file(
     reference_haplotypes: &[String],
     similarity_column: &str,
 ) -> Result<std::collections::HashMap<String, Vec<AncestryObservation>>> {
-    let file = File::open(path)?;
+    let file = File::open(path)
+        .with_context(|| format!("opening similarity file {}", path.display()))?;
     let reader = BufReader::new(file);
 
     let lines = reader.lines().map_while(Result::ok);
     parse_similarity_data_column(lines, query_samples, reference_haplotypes, similarity_column)
-        .map_err(|e| anyhow::anyhow!("Failed to parse similarity file: {}", e))
+        .map_err(|e| anyhow::anyhow!("parsing similarity file {}: {}", path.display(), e))
 }
 
 fn load_similarity_file_with_coverage(
@@ -3935,12 +3936,13 @@ fn load_similarity_file_with_coverage(
     reference_haplotypes: &[String],
     similarity_column: &str,
 ) -> Result<std::collections::HashMap<String, Vec<AncestryObservation>>> {
-    let file = File::open(path)?;
+    let file = File::open(path)
+        .with_context(|| format!("opening similarity file {}", path.display()))?;
     let reader = BufReader::new(file);
 
     let lines = reader.lines().map_while(Result::ok);
     parse_similarity_data_with_coverage(lines, query_samples, reference_haplotypes, similarity_column)
-        .map_err(|e| anyhow::anyhow!("Failed to parse similarity file with coverage: {}", e))
+        .map_err(|e| anyhow::anyhow!("parsing similarity file {} (with coverage): {}", path.display(), e))
 }
 
 #[allow(clippy::too_many_arguments)]
