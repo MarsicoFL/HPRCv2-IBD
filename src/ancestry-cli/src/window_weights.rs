@@ -1,3 +1,4 @@
+#![warn(missing_docs)]
 //! Per-window confidence weights for emission scaling.
 //!
 //! A window weight `w_t ∈ [0, 1]` expresses how much the HMM should trust the
@@ -208,6 +209,7 @@ impl WindowWeights {
         self.table.values().map(HashMap::len).sum()
     }
 
+    /// `true` if no weight entries have been loaded.
     pub fn is_empty(&self) -> bool {
         self.table.is_empty() || self.len() == 0
     }
@@ -348,8 +350,11 @@ pub fn weights_for_observations<O: HasWindowKey>(
 /// Trait letting `weights_for_observations` work over any observation type
 /// that carries a `(chrom, start, end)` window key.
 pub trait HasWindowKey {
+    /// Chromosome / scaffold name.
     fn chrom(&self) -> &str;
+    /// Inclusive 0-based start coordinate of the window.
     fn start(&self) -> u64;
+    /// Exclusive end coordinate of the window.
     fn end(&self) -> u64;
 }
 
