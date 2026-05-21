@@ -200,9 +200,7 @@ the weights file, `ancestry` emits a warning that suggests a window-grid
 mismatch (typically caused by re-tiling at a different size or by including
 intervals that span more than one ancestry window). Omitting
 `--window-weights` is a strict no-op — exercised in CI by
-`data/examples/ancestry/run_weights.sh`. The paper bundled in `paper/`
-contains the TAS2R-locus validation case study; `CHANGELOG.md` has the
-full release notes.
+`data/examples/ancestry/run_weights.sh`.
 
 ### 4a. Kinship scalar from detected IBD
 

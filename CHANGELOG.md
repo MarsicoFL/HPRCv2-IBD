@@ -20,7 +20,6 @@
   shrink the log-emission toward uniform where alignment support is low.
 - Public exports: `WindowWeights`, `WeightMode`, `apply_window_weights`,
   `weights_for_observations`, `HasWindowKey`.
-- Paper: TAS2R case-study section + figure.
 
 `--window-weights` is opt-in; omitting it is a no-op.
 
