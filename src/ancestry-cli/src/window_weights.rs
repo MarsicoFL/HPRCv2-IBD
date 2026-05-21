@@ -59,6 +59,21 @@ pub enum WeightMode {
     Mult,
 }
 
+impl Default for WeightMode {
+    fn default() -> Self {
+        Self::Interp
+    }
+}
+
+impl std::fmt::Display for WeightMode {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        f.write_str(match self {
+            WeightMode::Interp => "interp",
+            WeightMode::Mult => "mult",
+        })
+    }
+}
+
 impl std::str::FromStr for WeightMode {
     type Err = String;
     fn from_str(s: &str) -> Result<Self, Self::Err> {
@@ -119,14 +134,16 @@ impl WindowWeights {
             let parts: Vec<&str> = line.split('\t').collect();
 
             // Header detection: only the *first* non-comment row is inspected.
-            // A header is recognized if any field matches one of the four
-            // expected column names. Otherwise the row is treated as data.
+            // A header is identified when the field at position `col_start`
+            // (default 1, the "start" column under positional layout) does not
+            // parse as a u64. This catches both labelled-header files and
+            // accidental matches where a chrom name happens to equal one of
+            // the keyword strings ("chrom", "start", "end", "weight").
             if !header_seen {
-                let header_like = parts
-                    .iter()
-                    .any(|f| matches!(*f, "chrom" | "start" | "end" | "weight"));
-                if header_like {
-                    header_seen = true;
+                header_seen = true;
+                let position_at_start = parts.get(col_start).copied().unwrap_or("");
+                if position_at_start.parse::<u64>().is_err() {
+                    // Header row: read column positions by name.
                     for (i, f) in parts.iter().enumerate() {
                         match *f {
                             "chrom" => col_chrom = i,
@@ -138,8 +155,8 @@ impl WindowWeights {
                     }
                     continue;
                 }
-                // No header → all subsequent rows use positional columns.
-                header_seen = true;
+                // Otherwise this row is data; fall through with default
+                // positional columns (chrom, start, end, weight).
             }
 
             if parts.len() <= col_weight {
@@ -179,6 +196,16 @@ impl WindowWeights {
                 anyhow::bail!(
                     "weight {} at {}:{} is outside [0, 1]",
                     weight,
+                    path.display(),
+                    lineno + 1
+                );
+            }
+            if end <= start {
+                anyhow::bail!(
+                    "invalid window {}:{}-{} at {}:{} (end must be strictly greater than start)",
+                    chrom,
+                    start,
+                    end,
                     path.display(),
                     lineno + 1
                 );
@@ -409,11 +436,52 @@ mod tests {
     }
 
     #[test]
+    fn rejects_inverted_window() {
+        let f = write_tsv("chrom\tstart\tend\tweight\nchr12\t10000\t5000\t0.5\n");
+        let err = WindowWeights::load(f.path()).unwrap_err();
+        assert!(format!("{err}").contains("end must be strictly greater"));
+    }
+
+    #[test]
+    fn rejects_zero_length_window() {
+        let f = write_tsv("chrom\tstart\tend\tweight\nchr12\t10000\t10000\t0.5\n");
+        let err = WindowWeights::load(f.path()).unwrap_err();
+        assert!(format!("{err}").contains("end must be strictly greater"));
+    }
+
+    #[test]
+    fn chrom_named_like_a_header_keyword_is_data() {
+        // Regression: prior header detection triggered on any field
+        // matching {"chrom","start","end","weight"}, so a data row with
+        // chrom == "chrom" was silently dropped as a header. Now the
+        // detector checks whether col_start parses as u64, which is
+        // robust to chromosome names that collide with column keywords.
+        let f = write_tsv("chrom\t0\t10000\t0.5\n");
+        let w = WindowWeights::load(f.path()).unwrap();
+        assert_eq!(w.len(), 1);
+        assert_eq!(w.get("chrom", 0, 10_000), 0.5);
+    }
+
+    #[test]
     fn weight_mode_parses() {
         use std::str::FromStr;
         assert_eq!(WeightMode::from_str("interp").unwrap(), WeightMode::Interp);
         assert_eq!(WeightMode::from_str("Mult").unwrap(), WeightMode::Mult);
         assert!(WeightMode::from_str("garbage").is_err());
+    }
+
+    #[test]
+    fn weight_mode_default_is_interp() {
+        assert_eq!(WeightMode::default(), WeightMode::Interp);
+    }
+
+    #[test]
+    fn weight_mode_display_roundtrips_through_parse() {
+        use std::str::FromStr;
+        for m in [WeightMode::Interp, WeightMode::Mult] {
+            let s = format!("{m}");
+            assert_eq!(WeightMode::from_str(&s).unwrap(), m);
+        }
     }
 
     #[test]
