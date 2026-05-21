@@ -26,3 +26,8 @@ impopk-common = { path = "../common" }
 [dev-dependencies]
 assert_cmd = "2.0"
 tempfile = "3.8"
+criterion = { version = "0.5", default-features = false, features = ["cargo_bench_support"] }
+
+[[bench]]
+name = "window_weights"
+harness = false
