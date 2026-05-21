@@ -226,13 +226,11 @@ pub fn parse_similarity_data_column(
     for line in lines {
         let fields: Vec<&str> = line.split('\t').collect();
 
-        if header_indices.is_none() {
-            // Parse header
+        let Some(idx) = header_indices.as_ref() else {
+            // First non-empty row: parse the header and move on.
             header_indices = Some(parse_header(&fields, similarity_column)?);
             continue;
-        }
-
-        let idx = header_indices.as_ref().unwrap();
+        };
 
         let chrom = fields.get(idx.chrom).ok_or("Missing chrom")?.to_string();
         let start: u64 = fields.get(idx.start).ok_or("Missing start")?
@@ -317,12 +315,11 @@ pub fn parse_similarity_data_with_coverage(
     for line in lines {
         let fields: Vec<&str> = line.split('\t').collect();
 
-        if header_indices.is_none() {
+        let Some(idx) = header_indices.as_ref() else {
+            // First non-empty row: parse the header and move on.
             header_indices = Some(parse_header_with_coverage(&fields, similarity_column)?);
             continue;
-        }
-
-        let idx = header_indices.as_ref().unwrap();
+        };
 
         let chrom = fields.get(idx.chrom).ok_or("Missing chrom")?.to_string();
         let start: u64 = fields.get(idx.start).ok_or("Missing start")?
