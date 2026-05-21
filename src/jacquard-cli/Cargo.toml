@@ -5,6 +5,7 @@ edition = "2021"
 authors = ["Franco Marsico"]
 description = "Jacquard delta coefficient estimation from IBS windows for HPRC pangenome data"
 license = "MIT"
+repository = "https://github.com/MarsicoFL/IMPOPk"
 keywords = ["bioinformatics", "Jacquard", "IBD", "relatedness", "HPRC"]
 categories = ["science", "command-line-utilities"]
 

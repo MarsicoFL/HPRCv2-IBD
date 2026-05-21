@@ -5,6 +5,7 @@ edition = "2021"
 authors = ["Franco Marsico"]
 description = "Local ancestry inference using HMM for pangenome data"
 license = "MIT"
+repository = "https://github.com/MarsicoFL/IMPOPk"
 
 [lib]
 name = "impopk_ancestry_cli"

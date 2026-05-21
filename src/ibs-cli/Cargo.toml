@@ -5,6 +5,7 @@ edition = "2021"
 authors = ["Franco Marsico"]
 description = "IBS window computation for impopk — wraps impg similarity"
 license = "MIT"
+repository = "https://github.com/MarsicoFL/IMPOPk"
 keywords = ["bioinformatics", "pangenome", "IBS", "HPRC"]
 categories = ["science", "command-line-utilities"]
 
