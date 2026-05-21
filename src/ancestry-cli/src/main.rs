@@ -3508,7 +3508,8 @@ fn main() -> Result<()> {
     };
 
     // Write output
-    let output_file = File::create(&args.output)?;
+    let output_file = File::create(&args.output)
+        .with_context(|| format!("creating output file {}", args.output.display()))?;
     let mut out = BufWriter::new(output_file);
 
     writeln!(out, "chrom\tstart\tend\tsample\tancestry\tn_windows\tmean_similarity\tmean_posterior\tdiscriminability\tlod_score")?;
@@ -3537,7 +3538,8 @@ fn main() -> Result<()> {
 
     // Write posteriors if requested
     if let Some(post_path) = &args.posteriors_output {
-        let post_file = File::create(post_path)?;
+        let post_file = File::create(post_path)
+            .with_context(|| format!("creating posteriors output {}", post_path.display()))?;
         let mut post_out = BufWriter::new(post_file);
 
         // Header with population names + diagnostic columns
@@ -3584,7 +3586,8 @@ fn main() -> Result<()> {
 
     // Write BED output if requested
     if let Some(bed_path) = &args.output_bed {
-        let bed_file = File::create(bed_path)?;
+        let bed_file = File::create(bed_path)
+            .with_context(|| format!("creating BED output {}", bed_path.display()))?;
         let mut bed_out = BufWriter::new(bed_file);
 
         for (_, segments, _) in &results {
@@ -4224,7 +4227,8 @@ fn validate_against_rfmix(
 
     // Write validation output TSV if requested
     if let Some(out_path) = validate_output {
-        let file = File::create(out_path)?;
+        let file = File::create(out_path)
+            .with_context(|| format!("creating validation output {}", out_path.display()))?;
         let mut out = BufWriter::new(file);
         for line in &output_lines {
             writeln!(out, "{}", line)?;
