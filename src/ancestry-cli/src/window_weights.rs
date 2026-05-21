@@ -59,6 +59,21 @@ pub enum WeightMode {
     Mult,
 }
 
+impl Default for WeightMode {
+    fn default() -> Self {
+        Self::Interp
+    }
+}
+
+impl std::fmt::Display for WeightMode {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        f.write_str(match self {
+            WeightMode::Interp => "interp",
+            WeightMode::Mult => "mult",
+        })
+    }
+}
+
 impl std::str::FromStr for WeightMode {
     type Err = String;
     fn from_str(s: &str) -> Result<Self, Self::Err> {
@@ -453,6 +468,20 @@ mod tests {
         assert_eq!(WeightMode::from_str("interp").unwrap(), WeightMode::Interp);
         assert_eq!(WeightMode::from_str("Mult").unwrap(), WeightMode::Mult);
         assert!(WeightMode::from_str("garbage").is_err());
+    }
+
+    #[test]
+    fn weight_mode_default_is_interp() {
+        assert_eq!(WeightMode::default(), WeightMode::Interp);
+    }
+
+    #[test]
+    fn weight_mode_display_roundtrips_through_parse() {
+        use std::str::FromStr;
+        for m in [WeightMode::Interp, WeightMode::Mult] {
+            let s = format!("{m}");
+            assert_eq!(WeightMode::from_str(&s).unwrap(), m);
+        }
     }
 
     #[test]
