@@ -51,18 +51,13 @@ use std::path::Path;
 use anyhow::{Context, Result};
 
 /// How a per-window weight is applied to the log-emission row.
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+#[derive(Debug, Default, Clone, Copy, PartialEq, Eq)]
 pub enum WeightMode {
     /// Convex blend with uniform: `w · log_e + (1 − w) · log(1/K)`.
+    #[default]
     Interp,
     /// Multiplicative: `w · log_e`. No pull toward uniform.
     Mult,
-}
-
-impl Default for WeightMode {
-    fn default() -> Self {
-        Self::Interp
-    }
 }
 
 impl std::fmt::Display for WeightMode {
