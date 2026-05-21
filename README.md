@@ -295,6 +295,18 @@ discriminability  lod_score
   (high = clear call, low = ambiguous).
 - `lod_score`: log-odds of the top state versus the next-best alternative.
 
+## Documentation
+
+- **CLI reference**: each binary has `--help` with per-flag descriptions.
+- **Library docs**: `cargo doc --workspace --open` builds and opens
+  rustdoc for the public Rust API of all six crates.
+- **Methods**: the bundled `paper/manuscript.pdf` (built from
+  `paper/manuscript.tex`) covers the underlying model, validation
+  benchmarks (simulation, CEPH pedigree, cattle, BXD), and the
+  structural-haplotype case study at the TAS2R cluster.
+- **Cite**: `CITATION.cff` ships with the repository; GitHub renders a
+  "Cite this repository" button on the project page.
+
 ## Tutorials
 
 End-to-end tutorials covering each mode are in `docs/tutorials.html`.
