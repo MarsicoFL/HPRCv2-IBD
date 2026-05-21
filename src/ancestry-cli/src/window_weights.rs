@@ -119,14 +119,16 @@ impl WindowWeights {
             let parts: Vec<&str> = line.split('\t').collect();
 
             // Header detection: only the *first* non-comment row is inspected.
-            // A header is recognized if any field matches one of the four
-            // expected column names. Otherwise the row is treated as data.
+            // A header is identified when the field at position `col_start`
+            // (default 1, the "start" column under positional layout) does not
+            // parse as a u64. This catches both labelled-header files and
+            // accidental matches where a chrom name happens to equal one of
+            // the keyword strings ("chrom", "start", "end", "weight").
             if !header_seen {
-                let header_like = parts
-                    .iter()
-                    .any(|f| matches!(*f, "chrom" | "start" | "end" | "weight"));
-                if header_like {
-                    header_seen = true;
+                header_seen = true;
+                let position_at_start = parts.get(col_start).copied().unwrap_or("");
+                if position_at_start.parse::<u64>().is_err() {
+                    // Header row: read column positions by name.
                     for (i, f) in parts.iter().enumerate() {
                         match *f {
                             "chrom" => col_chrom = i,
@@ -138,8 +140,8 @@ impl WindowWeights {
                     }
                     continue;
                 }
-                // No header → all subsequent rows use positional columns.
-                header_seen = true;
+                // Otherwise this row is data; fall through with default
+                // positional columns (chrom, start, end, weight).
             }
 
             if parts.len() <= col_weight {
@@ -406,6 +408,19 @@ mod tests {
         let f = write_tsv("chr12\t0\t10000\t0.7\n");
         let w = WindowWeights::load(f.path()).unwrap();
         assert_eq!(w.get("chr12", 0, 10_000), 0.7);
+    }
+
+    #[test]
+    fn chrom_named_like_a_header_keyword_is_data() {
+        // Regression: prior header detection triggered on any field
+        // matching {"chrom","start","end","weight"}, so a data row with
+        // chrom == "chrom" was silently dropped as a header. Now the
+        // detector checks whether col_start parses as u64, which is
+        // robust to chromosome names that collide with column keywords.
+        let f = write_tsv("chrom\t0\t10000\t0.5\n");
+        let w = WindowWeights::load(f.path()).unwrap();
+        assert_eq!(w.len(), 1);
+        assert_eq!(w.get("chrom", 0, 10_000), 0.5);
     }
 
     #[test]
