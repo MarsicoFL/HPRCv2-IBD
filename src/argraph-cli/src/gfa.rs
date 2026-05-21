@@ -114,3 +114,102 @@ impl Graph {
         self.backward.get(&n).map_or(&[], |v| v.as_slice())
     }
 }
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use std::io::Write;
+    use tempfile::NamedTempFile;
+
+    fn parse_gfa(text: &str) -> Result<Graph> {
+        let mut f = NamedTempFile::new().unwrap();
+        f.write_all(text.as_bytes()).unwrap();
+        f.flush().unwrap();
+        Graph::parse(f.path())
+    }
+
+    /// Diamond: 1 → {2, 3} → 4, one path 1,2,4 and another 1,3,4.
+    fn diamond_gfa() -> &'static str {
+        "H\tVN:Z:1.0\n\
+         S\t1\tA\n\
+         S\t2\tC\n\
+         S\t3\tG\n\
+         S\t4\tT\n\
+         L\t1\t+\t2\t+\t0M\n\
+         L\t1\t+\t3\t+\t0M\n\
+         L\t2\t+\t4\t+\t0M\n\
+         L\t3\t+\t4\t+\t0M\n\
+         P\thapA\t1+,2+,4+\t*\n\
+         P\thapB\t1+,3+,4+\t*\n"
+    }
+
+    #[test]
+    fn parse_diamond_builds_segments_links_paths() {
+        let g = parse_gfa(diamond_gfa()).unwrap();
+        assert_eq!(g.seq.len(), 4);
+        assert_eq!(g.seq[&1], b"A");
+        assert_eq!(g.seq[&4], b"T");
+        assert_eq!(g.paths.len(), 2);
+        assert_eq!(g.paths[0].name, "hapA");
+        assert_eq!(g.paths[0].nodes, vec![1, 2, 4]);
+        assert_eq!(g.paths[1].nodes, vec![1, 3, 4]);
+    }
+
+    #[test]
+    fn successors_predecessors_match_links() {
+        let g = parse_gfa(diamond_gfa()).unwrap();
+        let mut succ_of_1: Vec<_> = g.successors(1).to_vec();
+        succ_of_1.sort_unstable();
+        assert_eq!(succ_of_1, vec![2, 3]);
+        let mut pred_of_4: Vec<_> = g.predecessors(4).to_vec();
+        pred_of_4.sort_unstable();
+        assert_eq!(pred_of_4, vec![2, 3]);
+        // Terminal nodes have no successors / no predecessors.
+        assert!(g.successors(4).is_empty());
+        assert!(g.predecessors(1).is_empty());
+    }
+
+    #[test]
+    fn missing_paths_errors() {
+        let text = "S\t1\tA\nS\t2\tC\nL\t1\t+\t2\t+\t0M\n";
+        let err = parse_gfa(text).unwrap_err();
+        assert!(format!("{err}").contains("no paths found"));
+    }
+
+    #[test]
+    fn empty_lines_and_unknown_tags_are_ignored() {
+        let text = "H\tVN:Z:1.0\n\
+                    \n\
+                    S\t1\tA\n\
+                    S\t2\tT\n\
+                    E\t1\t+\t2\t+\n\
+                    W\thapA\t1\thapA-coords\n\
+                    L\t1\t+\t2\t+\t0M\n\
+                    P\thapA\t1+,2+\t*\n";
+        let g = parse_gfa(text).unwrap();
+        assert_eq!(g.seq.len(), 2);
+        assert_eq!(g.paths.len(), 1);
+    }
+
+    #[test]
+    fn path_strand_suffix_is_stripped() {
+        // Path tokens with mixed strand markers must parse as plain ids.
+        let text = "S\t1\tA\nS\t2\tT\nL\t1\t+\t2\t+\t0M\nP\thapA\t1-,2+\t*\n";
+        let g = parse_gfa(text).unwrap();
+        assert_eq!(g.paths[0].nodes, vec![1, 2]);
+    }
+
+    #[test]
+    fn successors_predecessors_missing_node_returns_empty() {
+        let g = parse_gfa(diamond_gfa()).unwrap();
+        // 999 doesn't exist in the graph; lookup must not panic.
+        assert!(g.successors(999).is_empty());
+        assert!(g.predecessors(999).is_empty());
+    }
+
+    #[test]
+    fn bad_segment_id_errors() {
+        let text = "S\tnotanid\tA\nP\tp\t1+\t*\n";
+        assert!(parse_gfa(text).is_err());
+    }
+}

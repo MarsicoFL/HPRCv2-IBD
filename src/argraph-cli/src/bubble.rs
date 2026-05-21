@@ -163,3 +163,140 @@ pub fn enumerate_bubbles(graph: &Graph, max_depth: usize) -> Vec<Bubble> {
         })
         .collect()
 }
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use crate::gfa::Path;
+    use std::collections::HashMap;
+
+    /// Build a Graph directly from forward edges + path names.
+    /// Each segment has a single byte sequence equal to its id mod 26 + 'A'.
+    fn graph(forward_edges: &[(NodeId, NodeId)], paths: &[(&str, &[NodeId])]) -> Graph {
+        let mut seq: HashMap<NodeId, Vec<u8>> = HashMap::new();
+        let mut forward: HashMap<NodeId, Vec<NodeId>> = HashMap::new();
+        let mut backward: HashMap<NodeId, Vec<NodeId>> = HashMap::new();
+        for &(a, b) in forward_edges {
+            forward.entry(a).or_default().push(b);
+            backward.entry(b).or_default().push(a);
+            seq.entry(a).or_insert_with(|| vec![b'A' + (a % 26) as u8]);
+            seq.entry(b).or_insert_with(|| vec![b'A' + (b % 26) as u8]);
+        }
+        let paths = paths
+            .iter()
+            .map(|(n, ns)| Path { name: (*n).to_string(), nodes: ns.to_vec() })
+            .collect();
+        Graph { seq, forward, backward, paths }
+    }
+
+    #[test]
+    fn enumerate_sources_picks_only_branching_nodes() {
+        // 1 → {2, 3}, 2 → 4, 3 → 4 — only node 1 has ≥2 outgoing.
+        let g = graph(
+            &[(1, 2), (1, 3), (2, 4), (3, 4)],
+            &[("a", &[1, 2, 4]), ("b", &[1, 3, 4])],
+        );
+        assert_eq!(enumerate_sources(&g), vec![1]);
+    }
+
+    #[test]
+    fn enumerate_sources_returns_sorted_deterministic() {
+        // Two branch points: 1 → {2, 3} and 5 → {6, 7}.
+        let g = graph(
+            &[(1, 2), (1, 3), (5, 6), (5, 7), (2, 5), (3, 5), (6, 8), (7, 8)],
+            &[("a", &[1, 2, 5, 6, 8]), ("b", &[1, 3, 5, 7, 8])],
+        );
+        assert_eq!(enumerate_sources(&g), vec![1, 5]);
+    }
+
+    #[test]
+    fn find_bubble_diamond() {
+        // 1 → {2, 3} → 4.
+        let g = graph(
+            &[(1, 2), (1, 3), (2, 4), (3, 4)],
+            &[("a", &[1, 2, 4]), ("b", &[1, 3, 4])],
+        );
+        let b = find_bubble(&g, 1, 8).expect("diamond should yield a bubble");
+        assert_eq!(b.source, 1);
+        assert_eq!(b.sink, 4);
+        assert_eq!(b.n_branches(), 2);
+        // Each branch is exactly one internal node (2 or 3).
+        let mut internals: Vec<NodeId> = b.branches.iter().flatten().copied().collect();
+        internals.sort_unstable();
+        assert_eq!(internals, vec![2, 3]);
+    }
+
+    #[test]
+    fn find_bubble_returns_none_for_non_branching_source() {
+        let g = graph(&[(1, 2), (2, 3)], &[("a", &[1, 2, 3])]);
+        assert!(find_bubble(&g, 1, 8).is_none());
+    }
+
+    #[test]
+    fn find_bubble_returns_none_when_branches_never_reconverge() {
+        // 1 → {2, 3}; 2 ends, 3 ends. No common descendant.
+        let g = graph(&[(1, 2), (1, 3)], &[("a", &[1, 2]), ("b", &[1, 3])]);
+        assert!(find_bubble(&g, 1, 8).is_none());
+    }
+
+    #[test]
+    fn find_bubble_respects_max_depth() {
+        // Long bubble: 1 → {2, 3}; chains 2 → 5 → 7 and 3 → 6 → 7. Sink at depth 2.
+        // max_depth is the iteration cap; the candidate check at iteration N
+        // sees frontier depth N, so a depth-2 sink needs max_depth >= 3.
+        let g = graph(
+            &[(1, 2), (1, 3), (2, 5), (3, 6), (5, 7), (6, 7)],
+            &[("a", &[1, 2, 5, 7]), ("b", &[1, 3, 6, 7])],
+        );
+        // max_depth=2 cannot reach the depth-2 candidate check → no bubble.
+        assert!(find_bubble(&g, 1, 2).is_none());
+        // max_depth=3 includes the iteration where the sink becomes shared.
+        let b = find_bubble(&g, 1, 3).expect("bubble closes by depth 2");
+        assert_eq!(b.sink, 7);
+    }
+
+    #[test]
+    fn find_bubble_handles_empty_branch_to_sink() {
+        // 1 → {2, 4}, 2 → 4 — branch via 2 has internal node 2, branch via 4
+        // is empty (direct edge to sink).
+        let g = graph(&[(1, 2), (1, 4), (2, 4)], &[("a", &[1, 2, 4]), ("b", &[1, 4])]);
+        let b = find_bubble(&g, 1, 8).expect("bubble exists");
+        assert_eq!(b.sink, 4);
+        // Exactly one branch is empty (direct), the other has [2].
+        let empty_count = b.branches.iter().filter(|br| br.is_empty()).count();
+        let single_node_count = b.branches.iter().filter(|br| br.len() == 1).count();
+        assert_eq!(empty_count, 1);
+        assert_eq!(single_node_count, 1);
+    }
+
+    #[test]
+    fn enumerate_bubbles_emits_one_per_source_with_fallback() {
+        // Two sources: diamond at 1 (converges), open at 5 (no reconvergence).
+        let g = graph(
+            &[(1, 2), (1, 3), (2, 4), (3, 4), (5, 6), (5, 7)],
+            &[("a", &[1, 2, 4, 5, 6]), ("b", &[1, 3, 4, 5, 7])],
+        );
+        let bubbles = enumerate_bubbles(&g, 8);
+        assert_eq!(bubbles.len(), 2);
+        // Diamond at source 1.
+        let b1 = bubbles.iter().find(|b| b.source == 1).unwrap();
+        assert_eq!(b1.sink, 4);
+        assert_eq!(b1.n_branches(), 2);
+        // Open bubble at source 5 → fallback (sink == source, no branches).
+        let b5 = bubbles.iter().find(|b| b.source == 5).unwrap();
+        assert_eq!(b5.sink, 5);
+        assert_eq!(b5.n_branches(), 0);
+    }
+
+    #[test]
+    fn three_branch_bubble() {
+        // 1 → {2, 3, 4} → 5.
+        let g = graph(
+            &[(1, 2), (1, 3), (1, 4), (2, 5), (3, 5), (4, 5)],
+            &[("a", &[1, 2, 5]), ("b", &[1, 3, 5]), ("c", &[1, 4, 5])],
+        );
+        let b = find_bubble(&g, 1, 4).expect("three-way bubble");
+        assert_eq!(b.sink, 5);
+        assert_eq!(b.n_branches(), 3);
+    }
+}
