@@ -137,11 +137,23 @@ pub struct AncestryHmmParams {
     pub transitions: Vec<Vec<f64>>,
     /// Prior probability of starting in each state
     pub initial: Vec<f64>,
-    /// Expected similarity when sample belongs to population (mean)
+    /// VESTIGIAL (do not use in the emission): mean same-population similarity.
+    /// Computed during `--estimate-params` for bookkeeping, but NOT read by the
+    /// active emission, which is the discriminative softmax in
+    /// `log_emission_similarity_only`. Left over from an earlier
+    /// Gaussian-emission draft; retained only for struct/test backward-compat.
     pub emission_same_pop_mean: f64,
-    /// Expected similarity when sample doesn't belong to population (mean)
+    /// VESTIGIAL (do not use in the emission): mean different-population
+    /// similarity. Same status as `emission_same_pop_mean` — written by
+    /// `--estimate-params`, never read by the softmax emission.
     pub emission_diff_pop_mean: f64,
-    /// Standard deviation for emission distributions
+    /// Softmax (Gibbs) **temperature** that controls emission sharpness — this is
+    /// NOT a Gaussian standard deviation, despite the historical name. The
+    /// emission is `P(state) ∝ exp(score / emission_std)`. It is set either
+    /// directly via `set_temperature`, or by `--estimate-params` to the standard
+    /// deviation of the per-window population-identity gaps (so the softmax is
+    /// auto-scaled to how separated the populations are). See
+    /// `log_emission_similarity_only` for the consumer.
     pub emission_std: f64,
     /// Emission model for aggregating per-haplotype similarities
     pub emission_model: EmissionModel,
